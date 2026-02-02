@@ -13,6 +13,7 @@ import {
   upsertBook,
 } from '@/src/storage';
 import { BookMeta, ReadingState } from '@/src/types';
+import { getErrorMessage } from '@/src/utils/errors';
 import { formatDuration, formatPercent } from '@/src/utils/format';
 
 export default function ReaderSetupScreen() {
@@ -22,6 +23,7 @@ export default function ReaderSetupScreen() {
   const [book, setBook] = useState<BookMeta | null>(null);
   const [savedState, setSavedState] = useState<ReadingState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [startFromBeginning, setStartFromBeginning] = useState(false);
   const [wpm, setWpm] = useState(320);
@@ -29,26 +31,41 @@ export default function ReaderSetupScreen() {
   const [punctuationPauses, setPunctuationPauses] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+
     async function loadData() {
-      const books = await loadBooks();
-      const foundBook = books.find((item) => item.id === bookId) ?? null;
-      if (!foundBook) {
-        router.back();
-        return;
+      try {
+        const books = await loadBooks();
+        const foundBook = books.find((item) => item.id === bookId) ?? null;
+        if (!foundBook) {
+          router.back();
+          return;
+        }
+
+        const defaults = await loadGlobalSettings();
+        const state = await loadReadingState(foundBook.id);
+        if (!isMounted) return;
+
+        setBook(foundBook);
+        setSavedState(state);
+        setWpm(state?.wpm ?? defaults.defaultWpm);
+        setOrpEnabled(state?.orpEnabled ?? defaults.defaultOrpEnabled);
+        setPunctuationPauses(state?.punctuationPauses ?? defaults.defaultPunctuationPauses);
+      } catch (nextError) {
+        if (!isMounted) return;
+        setError(getErrorMessage(nextError, 'Failed to load reader setup.'));
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
-
-      const defaults = await loadGlobalSettings();
-      const state = await loadReadingState(foundBook.id);
-
-      setBook(foundBook);
-      setSavedState(state);
-      setWpm(state?.wpm ?? defaults.defaultWpm);
-      setOrpEnabled(state?.orpEnabled ?? defaults.defaultOrpEnabled);
-      setPunctuationPauses(state?.punctuationPauses ?? defaults.defaultPunctuationPauses);
-      setLoading(false);
     }
 
     loadData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [bookId, router]);
 
   const currentIndex = startFromBeginning ? 0 : savedState?.index ?? 0;
@@ -87,9 +104,9 @@ export default function ReaderSetupScreen() {
     router.push({ pathname: '/reader/[bookId]', params: { bookId: book.id } });
   };
 
-  if (loading || !book) {
+  if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
         <View style={styles.centered}>
           <ActivityIndicator color="#5cc8ff" />
         </View>
@@ -97,11 +114,28 @@ export default function ReaderSetupScreen() {
     );
   }
 
+  if (error) {
+    return (
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
+        <View style={styles.centered}>
+          <Text style={styles.meta}>{error}</Text>
+          <Pressable style={[styles.cta, { marginTop: 16 }]} onPress={() => router.back()}>
+            <Text style={styles.ctaText}>Back</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!book) {
+    return null;
+  }
+
   const progress = formatPercent(savedState?.index ?? 0, book.tokenCount);
   const chapterCount = book.chapters?.length ?? 0;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
       <View style={styles.container}>
         <Text style={styles.title}>{book.title}</Text>
         <Text style={styles.meta}>{book.tokenCount} tokens | Progress {progress}</Text>
@@ -154,7 +188,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 4,
   },
   centered: {
     flex: 1,

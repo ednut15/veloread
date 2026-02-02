@@ -40,6 +40,14 @@ const EPUB_TEXT_MEDIA_TYPES = new Set([
   'text/xml',
 ]);
 
+// Guardrails to avoid memory pressure from very large or malformed EPUB files.
+const MAX_EPUB_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_EPUB_ZIP_ENTRIES = 5000;
+const MAX_EPUB_SPINE_SECTIONS = 1500;
+const MAX_EPUB_SECTION_TEXT_CHARS = 450000;
+const MAX_EPUB_TOTAL_TEXT_CHARS = 8000000;
+const MAX_EPUB_TOKEN_COUNT = 1000000;
+
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&',
   apos: "'",
@@ -80,6 +88,12 @@ export async function pickBookFile() {
 
   if (result.canceled) return null;
   return result.assets?.[0] ?? null;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function toArray<T>(value: T | T[] | null | undefined): T[] {
@@ -331,6 +345,10 @@ async function extractEpubSections(
 ): Promise<{ title: string | null; sections: EpubSection[] }> {
   onProgress?.(0.2);
   const zip = await JSZip.loadAsync(base64Epub, { base64: true });
+  const zipEntries = Object.keys(zip.files).length;
+  if (zipEntries > MAX_EPUB_ZIP_ENTRIES) {
+    throw new Error('This EPUB contains too many files to import safely.');
+  }
   onProgress?.(0.4);
 
   const packagePath = await loadPackagePath(zip);
@@ -343,13 +361,24 @@ async function extractEpubSections(
   if (!sections.length) {
     throw new Error('This EPUB does not contain readable chapter documents.');
   }
+  if (sections.length > MAX_EPUB_SPINE_SECTIONS) {
+    throw new Error('This EPUB contains too many chapters/sections to import safely.');
+  }
 
   const extractedSections: EpubSection[] = [];
+  let totalTextChars = 0;
   for (let i = 0; i < sections.length; i += 1) {
     const section = sections[i];
     const markup = await getZipTextFile(zip, section.path);
     if (!markup) continue;
     const sectionText = htmlToText(markup);
+    if (sectionText.length > MAX_EPUB_SECTION_TEXT_CHARS) {
+      throw new Error('A chapter in this EPUB is too large to import safely.');
+    }
+    totalTextChars += sectionText.length;
+    if (totalTextChars > MAX_EPUB_TOTAL_TEXT_CHARS) {
+      throw new Error('This EPUB is too large to import on this device.');
+    }
     const sectionTitle =
       extractMarkupTitle(markup) ??
       (section.titleHint ? asInlineText(section.titleHint) : null) ??
@@ -440,13 +469,51 @@ export async function importEpubFromUri(
   callbacks?: ImportCallbacks
 ): Promise<ImportedBook> {
   callbacks?.onProgress?.({ phase: 'reading', progress: 0.05 });
-  const base64Epub = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  const info = await FileSystem.getInfoAsync(uri);
+  if (!info.exists) {
+    throw new Error('Could not access the selected EPUB file.');
+  }
+  if (info.isDirectory) {
+    throw new Error('The selected file is not a valid EPUB document.');
+  }
+  if (typeof info.size === 'number' && info.size > MAX_EPUB_FILE_BYTES) {
+    throw new Error(
+      `This EPUB is ${formatBytes(info.size)}, above the ${formatBytes(MAX_EPUB_FILE_BYTES)} import limit.`
+    );
+  }
 
-  const extracted = await extractEpubSections(base64Epub, (progress) => {
-    callbacks?.onProgress?.({ phase: 'reading', progress });
-  });
+  let base64Epub = '';
+  try {
+    base64Epub = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  } catch {
+    throw new Error('Could not load this EPUB. It may be too large for available memory.');
+  }
+  const estimatedBytes = Math.floor((base64Epub.length * 3) / 4);
+  if (estimatedBytes > MAX_EPUB_FILE_BYTES) {
+    throw new Error(
+      `This EPUB is ${formatBytes(estimatedBytes)}, above the ${formatBytes(MAX_EPUB_FILE_BYTES)} import limit.`
+    );
+  }
+
+  let extracted: { title: string | null; sections: EpubSection[] };
+  try {
+    extracted = await extractEpubSections(base64Epub, (progress) => {
+      callbacks?.onProgress?.({ phase: 'reading', progress });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const isKnown =
+      message.startsWith('Invalid EPUB:') ||
+      message.includes('does not contain readable') ||
+      message.includes('too large') ||
+      message.includes('too many');
+    if (isKnown) {
+      throw error;
+    }
+    throw new Error('Could not parse this EPUB. It may be corrupted or use unsupported formatting.');
+  }
 
   if (!extracted.sections.length) {
     throw new Error('Could not extract readable text from this EPUB.');
@@ -477,6 +544,11 @@ export async function importEpubFromUri(
 
       textLength += section.text.length;
     }
+
+    if (tokens.length > MAX_EPUB_TOKEN_COUNT) {
+      throw new Error('This EPUB contains too many words/tokens to import safely.');
+    }
+
     callbacks?.onProgress?.({
       phase: 'tokenizing',
       progress: (i + 1) / extracted.sections.length,

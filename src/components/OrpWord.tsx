@@ -52,13 +52,25 @@ const monoFont = Platform.select({
 });
 
 function OrpWordBase({ token, enabled, size = 50, maxWidth }: Props) {
+  const slotLineHeight = Math.round(size * 1.2);
+
   if (!enabled || !isWord(token)) {
-    return <Text style={[styles.base, { fontSize: size }]}>{token === '\n' ? '¶' : token}</Text>;
+    return (
+      <View style={[styles.slot, { minHeight: slotLineHeight }]}>
+        <Text style={[styles.base, { fontSize: size, lineHeight: slotLineHeight }]}>
+          {token === '\n' ? '¶' : token}
+        </Text>
+      </View>
+    );
   }
 
   const parts = splitWordToken(token);
   if (!parts) {
-    return <Text style={[styles.base, { fontSize: size }]}>{token}</Text>;
+    return (
+      <View style={[styles.slot, { minHeight: slotLineHeight }]}>
+        <Text style={[styles.base, { fontSize: size, lineHeight: slotLineHeight }]}>{token}</Text>
+      </View>
+    );
   }
 
   const idx = Math.min(getOrpIndex(parts.core), parts.core.length - 1);
@@ -68,19 +80,24 @@ function OrpWordBase({ token, enabled, size = 50, maxWidth }: Props) {
   const leftText = `${parts.leading}${prefix}`;
   const rightText = `${suffix}${parts.trailing}`;
   const effectiveSize = getDeterministicOrpSize(size, maxWidth, leftText.length, rightText.length);
-  const lineHeight = Math.round(effectiveSize * 1.2);
 
   return (
-    <View style={styles.row}>
-      <Text numberOfLines={1} style={[styles.base, styles.mono, styles.side, styles.left, { fontSize: effectiveSize, lineHeight }]}>
-        {leftText}
-      </Text>
-      <Text style={[styles.base, styles.mono, styles.orp, { fontSize: effectiveSize, lineHeight }]}>
-        {orpChar}
-      </Text>
-      <Text numberOfLines={1} style={[styles.base, styles.mono, styles.side, styles.right, { fontSize: effectiveSize, lineHeight }]}>
-        {rightText}
-      </Text>
+    <View style={[styles.slot, { minHeight: slotLineHeight }]}>
+      <View style={styles.row}>
+        <Text
+          numberOfLines={1}
+          style={[styles.base, styles.mono, styles.side, styles.left, { fontSize: effectiveSize, lineHeight: slotLineHeight }]}>
+          {leftText}
+        </Text>
+        <Text style={[styles.base, styles.mono, styles.orp, { fontSize: effectiveSize, lineHeight: slotLineHeight }]}>
+          {orpChar}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[styles.base, styles.mono, styles.side, styles.right, { fontSize: effectiveSize, lineHeight: slotLineHeight }]}>
+          {rightText}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -100,6 +117,10 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  slot: {
+    width: '100%',
+    justifyContent: 'center',
   },
   side: {
     flex: 1,

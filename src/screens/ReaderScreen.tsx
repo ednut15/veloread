@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -10,81 +10,23 @@ import {
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useFocusEffect } from '@react-navigation/native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { OrpWord } from '@/src/components/OrpWord';
 import { estimatedSeconds } from '@/src/parsing/tokenize';
+import { findChapterIndex, normalizeChapters } from '@/src/reader/chapters';
 import { usePlayback } from '@/src/reader/usePlayback';
 import { loadBooks, loadReadingState, loadTokenChunk, saveReadingState, upsertBook } from '@/src/storage';
 import { DEFAULT_WPM } from '@/src/storage/keys';
-import { BookMeta, ChapterMeta, ReadingState } from '@/src/types';
+import { BookMeta, ReadingState } from '@/src/types';
+import { getErrorMessage } from '@/src/utils/errors';
 import { formatDuration, formatPercent } from '@/src/utils/format';
-
-function normalizeChapters(chapters: ChapterMeta[] | undefined, tokenCount: number): ChapterMeta[] {
-  if (!chapters?.length || tokenCount <= 0) return [];
-
-  const sorted = chapters
-    .map((chapter) => {
-      const rawStart = Number(chapter.startToken);
-      if (!Number.isFinite(rawStart)) return null;
-
-      const rawEnd = Number(chapter.endToken);
-      return {
-        title: chapter.title,
-        startToken: Math.max(0, Math.min(tokenCount - 1, Math.floor(rawStart))),
-        endToken: Number.isFinite(rawEnd)
-          ? Math.max(0, Math.min(tokenCount, Math.floor(rawEnd)))
-          : tokenCount,
-      };
-    })
-    .filter((chapter): chapter is { title: string; startToken: number; endToken: number } => Boolean(chapter))
-    .sort((a, b) => a.startToken - b.startToken);
-
-  const normalized: ChapterMeta[] = [];
-  for (let i = 0; i < sorted.length; i += 1) {
-    const chapter = sorted[i];
-    const next = sorted[i + 1];
-    if (normalized.length > 0 && normalized[normalized.length - 1].startToken === chapter.startToken) {
-      continue;
-    }
-
-    const fallbackEnd = next ? next.startToken : tokenCount;
-    const safeEnd = Math.max(chapter.startToken + 1, Math.min(tokenCount, chapter.endToken || fallbackEnd));
-    const title = chapter.title?.trim() || `Chapter ${normalized.length + 1}`;
-    normalized.push({
-      title,
-      startToken: chapter.startToken,
-      endToken: safeEnd,
-    });
-  }
-
-  return normalized;
-}
-
-function findChapterIndex(chapters: ChapterMeta[], tokenIndex: number): number {
-  if (!chapters.length) return -1;
-
-  let low = 0;
-  let high = chapters.length - 1;
-  let best = 0;
-
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    if (chapters[mid].startToken <= tokenIndex) {
-      best = mid;
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-
-  return best;
-}
 
 export default function ReaderScreen() {
   const { bookId } = useLocalSearchParams<{ bookId: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
 
   const [book, setBook] = useState<BookMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,6 +37,7 @@ export default function ReaderScreen() {
   const [orpEnabled, setOrpEnabled] = useState(true);
   const [punctuationPauses, setPunctuationPauses] = useState(true);
   const [tapWidth, setTapWidth] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   const chunkCacheRef = useRef(new Map<number, string[]>());
   const lastPersistRef = useRef({ at: 0, index: 0 });
@@ -208,29 +151,45 @@ export default function ReaderScreen() {
   }, [punctuationPauses]);
 
   useEffect(() => {
+    let isMounted = true;
+
     async function bootstrap() {
-      const books = await loadBooks();
-      const found = books.find((item) => item.id === bookId) ?? null;
-      if (!found) {
-        router.back();
-        return;
+      try {
+        const books = await loadBooks();
+        const found = books.find((item) => item.id === bookId) ?? null;
+        if (!found) {
+          router.back();
+          return;
+        }
+
+        const state = await loadReadingState(found.id);
+        if (!isMounted) return;
+
+        chunkCacheRef.current.clear();
+        bookRef.current = found;
+        setBook(found);
+        setIndex(state?.index ?? 0);
+        setWpm(state?.wpm ?? DEFAULT_WPM);
+        setOrpEnabled(state?.orpEnabled ?? true);
+        setPunctuationPauses(state?.punctuationPauses ?? true);
+
+        await ensureChunk(0);
+        await primeAroundIndex(state?.index ?? 0);
+      } catch (nextError) {
+        if (!isMounted) return;
+        setError(getErrorMessage(nextError, 'Failed to load reader.'));
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
-
-      const state = await loadReadingState(found.id);
-      chunkCacheRef.current.clear();
-      bookRef.current = found;
-      setBook(found);
-      setIndex(state?.index ?? 0);
-      setWpm(state?.wpm ?? DEFAULT_WPM);
-      setOrpEnabled(state?.orpEnabled ?? true);
-      setPunctuationPauses(state?.punctuationPauses ?? true);
-      setLoading(false);
-
-      await ensureChunk(0);
-      await primeAroundIndex(state?.index ?? 0);
     }
 
     bootstrap();
+
+    return () => {
+      isMounted = false;
+    };
   }, [bookId, ensureChunk, primeAroundIndex, router]);
 
   useEffect(() => {
@@ -387,9 +346,28 @@ export default function ReaderScreen() {
     [book, chapters, primeAroundIndex]
   );
 
-  if (loading || !book) {
+  const headerProgressLabel = useMemo(() => {
+    if (!book || book.tokenCount <= 0) return null;
+    const consumedCount = Math.min(index + 1, book.tokenCount);
+    return formatPercent(consumedCount, book.tokenCount);
+  }, [book, index]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () =>
+        headerProgressLabel ? (
+          <View pointerEvents="none" style={styles.headerProgressContainer}>
+            <Text selectable={false} suppressHighlighting style={styles.headerProgress}>
+              {headerProgressLabel}
+            </Text>
+          </View>
+        ) : null,
+    });
+  }, [navigation, headerProgressLabel]);
+
+  if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
         <View style={styles.centered}>
           <ActivityIndicator color="#5cc8ff" />
         </View>
@@ -397,9 +375,26 @@ export default function ReaderScreen() {
     );
   }
 
+  if (error) {
+    return (
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
+        <View style={styles.centered}>
+          <Text style={styles.meta}>{error}</Text>
+          <Pressable style={[styles.smallButton, { marginTop: 12 }]} onPress={() => router.back()}>
+            <Text style={styles.smallButtonText}>Back</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!book) {
+    return null;
+  }
+
   if (book.tokenCount === 0) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
         <View style={styles.centered}>
           <Text style={styles.meta}>This book has no tokens.</Text>
           <Pressable style={[styles.smallButton, { marginTop: 12 }]} onPress={() => router.back()}>
@@ -412,13 +407,10 @@ export default function ReaderScreen() {
 
   const consumedCount = Math.min(index + 1, book.tokenCount);
   const remaining = Math.max(book.tokenCount - consumedCount, 0);
-  const progress = formatPercent(consumedCount, book.tokenCount);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
       <View style={styles.container}>
-        <Text style={[styles.meta, styles.progressMeta]}>{progress}</Text>
-
         <View style={styles.readerPanel} onLayout={onReaderLayout}>
           <Pressable style={styles.readerPressable} onPress={(event) => onReaderTap(event.nativeEvent.locationX)}>
             <OrpWord token={effectiveToken || '...'} enabled={orpEnabled} maxWidth={tapWidth > 0 ? tapWidth - 40 : undefined} />
@@ -533,7 +525,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 14,
-    paddingTop: 10,
+    paddingTop: 4,
   },
   readerPanel: {
     flex: 1,
@@ -603,13 +595,20 @@ const styles = StyleSheet.create({
     color: '#9fb1ce',
     marginTop: 6,
   },
+  headerProgressContainer: {
+    width: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerProgress: {
+    color: '#f5f7ff',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   chapterMeta: {
     color: '#9fb1ce',
     marginTop: -2,
     marginBottom: 10,
-  },
-  progressMeta: {
-    textAlign: 'right',
-    marginBottom: 8,
   },
 });

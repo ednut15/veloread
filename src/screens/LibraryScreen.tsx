@@ -22,6 +22,7 @@ import {
 } from '@/src/storage';
 import { DEFAULT_CHUNK_SIZE } from '@/src/storage/keys';
 import { BookMeta, ImportProgress, ReadingState } from '@/src/types';
+import { getErrorMessage } from '@/src/utils/errors';
 import { formatDate, formatPercent } from '@/src/utils/format';
 import { importEpubFromUri, importTxtFromUri, pickBookFile, validateImportName } from '@/src/utils/importBook';
 
@@ -68,11 +69,15 @@ export default function LibraryScreen() {
   const [lastPreview, setLastPreview] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const bookMetas = await loadBooks();
-    const states = await Promise.all(
-      bookMetas.map(async (meta) => ({ meta, state: await loadReadingState(meta.id) }))
-    );
-    setBooks(states);
+    try {
+      const bookMetas = await loadBooks();
+      const states = await Promise.all(
+        bookMetas.map(async (meta) => ({ meta, state: await loadReadingState(meta.id) }))
+      );
+      setBooks(states);
+    } catch (error) {
+      setError(getErrorMessage(error, 'Failed to load your library.'));
+    }
   }, []);
 
   useEffect(() => {
@@ -121,8 +126,8 @@ export default function LibraryScreen() {
       await saveReadingState(state);
       await refresh();
       setLastPreview(meta.preview);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load sample.');
+    } catch (error) {
+      setError(getErrorMessage(error, 'Failed to load sample.'));
     } finally {
       setImportStatus(null);
       setIsBusy(false);
@@ -162,8 +167,8 @@ export default function LibraryScreen() {
       await saveReadingState(imported.initialState);
       setLastPreview(imported.meta.preview);
       await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to import book.');
+    } catch (error) {
+      setError(getErrorMessage(error, 'Failed to import book.'));
     } finally {
       setIsBusy(false);
       setImportStatus(null);
@@ -178,8 +183,12 @@ export default function LibraryScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await removeBook(bookId);
-            refresh();
+            try {
+              await removeBook(bookId);
+              await refresh();
+            } catch (error) {
+              setError(getErrorMessage(error, 'Failed to delete the book.'));
+            }
           },
         },
       ]);
@@ -217,7 +226,7 @@ export default function LibraryScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeArea}>
       <View style={styles.container}>
         <Text style={styles.title}>VeloRead</Text>
         <Text style={styles.subtitle}>RSVP reading with ORP focus</Text>
@@ -261,7 +270,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 4,
   },
   title: {
     color: '#f5f7ff',

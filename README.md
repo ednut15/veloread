@@ -79,3 +79,10 @@ src/
 
 - Data is stored locally on device via AsyncStorage.
 - Large books are saved in token chunks for better runtime performance.
+
+## Legal and compliance
+
+- License: `LICENSE`
+- Privacy Policy: `docs/compliance/PRIVACY_POLICY.md`
+- Terms of Use: `docs/compliance/TERMS_OF_USE.md`
+- Store submission draft answers: `docs/compliance/STORE_PRIVACY_DISCLOSURE.md`
