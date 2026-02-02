@@ -86,3 +86,5 @@ src/
 - Privacy Policy: `docs/compliance/PRIVACY_POLICY.md`
 - Terms of Use: `docs/compliance/TERMS_OF_USE.md`
 - Store submission draft answers: `docs/compliance/STORE_PRIVACY_DISCLOSURE.md`
+- GitHub Pages public policy URL: `https://ednut15.github.io/veloread/privacy/`
+- GitHub Pages public terms URL: `https://ednut15.github.io/veloread/terms/`
