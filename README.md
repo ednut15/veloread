@@ -1,50 +1,80 @@
-# Welcome to your Expo app 👋
+# VeloRead
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+VeloRead is a mobile speed-reading app built with Expo + React Native.
+It uses RSVP-style playback (one token at a time), optional ORP highlighting,
+and punctuation-aware pacing to help you read faster while staying in flow.
 
-## Get started
+## Features
 
-1. Install dependencies
+- Import plain text (`.txt`) books from your device.
+- Load a built-in sample text to test the reader quickly.
+- Tune reading speed from 120 to 900 WPM.
+- Toggle ORP highlight and punctuation pauses.
+- Resume where you stopped, with reading progress persisted locally.
+- Jump quickly through text (`-10`, `+10`, tap zones, and progress slider).
 
-   ```bash
-   npm install
-   ```
+## Current format support
 
-2. Start the app
+- Supported: `.txt`
+- Planned: `.epub` (not yet implemented)
 
-   ```bash
-   npx expo start
-   ```
+## Tech stack
 
-In the output, you'll find options to open the app in a
+- Expo SDK 54
+- React Native 0.81
+- Expo Router (file-based routing)
+- AsyncStorage for local persistence
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## Getting started
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### Prerequisites
 
-## Get a fresh project
+- Node.js 18+ (recommended)
+- npm
+- Expo-compatible simulator/device (Expo Go, iOS Simulator, or Android Emulator)
 
-When you're ready, run:
+### Install and run
 
 ```bash
-npm run reset-project
+npm install
+npm run start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Then choose a target from the Expo CLI output.
 
-## Learn more
+## Useful scripts
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+npm run start    # Start Metro / Expo dev server
+npm run android  # Open Android target
+npm run ios      # Open iOS target
+npm run web      # Run web target
+npm run lint     # Run lint checks
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Reading flow
 
-## Join the community
+1. Open the library screen.
+2. Tap **Load Sample** or **Import Book**.
+3. Open a book and configure WPM + reading options.
+4. Start reading in the RSVP reader and adjust controls live.
 
-Join our community of developers creating universal apps.
+## Project structure
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```text
+app/
+  index.tsx              # Library screen route
+  setup/[bookId].tsx     # Reader setup route
+  reader/[bookId].tsx    # Reader route
+src/
+  screens/               # Main screen implementations
+  parsing/               # Tokenization and read-time estimates
+  reader/                # Playback timing logic
+  storage/               # AsyncStorage data access
+  utils/                 # Import and formatting helpers
+```
+
+## Notes
+
+- Data is stored locally on device via AsyncStorage.
+- Large books are saved in token chunks for better runtime performance.
