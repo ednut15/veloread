@@ -38,4 +38,4 @@ Use this as a draft when completing privacy forms in App Store Connect and Googl
 
 1. Platform providers (Apple/Google/device OS) may collect diagnostics under their own policies.
 2. If you add analytics, crash reporting, auth, cloud sync, ads, subscriptions, or web APIs, update this file and store disclosures before release.
-3. Host `docs/compliance/PRIVACY_POLICY.md` at a public URL for store submissions.
+3. Host `legal/compliance/PRIVACY_POLICY.md` at a public URL for store submissions.
