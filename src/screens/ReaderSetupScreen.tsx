@@ -98,12 +98,14 @@ export default function ReaderSetupScreen() {
   }
 
   const progress = formatPercent(savedState?.index ?? 0, book.tokenCount);
+  const chapterCount = book.chapters?.length ?? 0;
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <Text style={styles.title}>{book.title}</Text>
         <Text style={styles.meta}>{book.tokenCount} tokens | Progress {progress}</Text>
+        {chapterCount > 1 ? <Text style={styles.meta}>Chapters: {chapterCount}</Text> : null}
 
         <View style={styles.sectionRow}>
           <Text style={styles.label}>Start from beginning</Text>

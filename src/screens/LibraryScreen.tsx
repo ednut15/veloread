@@ -23,7 +23,7 @@ import {
 import { DEFAULT_CHUNK_SIZE } from '@/src/storage/keys';
 import { BookMeta, ImportProgress, ReadingState } from '@/src/types';
 import { formatDate, formatPercent } from '@/src/utils/format';
-import { importTxtFromUri, pickBookFile, validateImportName } from '@/src/utils/importBook';
+import { importEpubFromUri, importTxtFromUri, pickBookFile, validateImportName } from '@/src/utils/importBook';
 
 const SAMPLE_TEXT = `VeloRead sample text.
 
@@ -137,12 +137,7 @@ export default function LibraryScreen() {
 
     const fileType = validateImportName(file.name ?? '');
     if (fileType === 'unsupported') {
-      setError('Unsupported format. Please import a .txt file.');
-      return;
-    }
-
-    if (fileType === 'epub') {
-      setError('ePub import is planned next. For now, please use .txt.');
+      setError('Unsupported format. Please import a .txt or .epub file.');
       return;
     }
 
@@ -151,7 +146,8 @@ export default function LibraryScreen() {
 
     try {
       const defaults = await loadGlobalSettings();
-      const imported = await importTxtFromUri(
+      const importer = fileType === 'epub' ? importEpubFromUri : importTxtFromUri;
+      const imported = await importer(
         file.uri,
         file.name || 'Imported Book',
         {
@@ -204,6 +200,9 @@ export default function LibraryScreen() {
           <Text style={styles.cardMeta}>
             {item.meta.tokenCount} tokens | {formatPercent(index, item.meta.tokenCount)}
           </Text>
+          {item.meta.chapters && item.meta.chapters.length > 1 ? (
+            <Text style={styles.cardMeta}>{item.meta.chapters.length} chapters</Text>
+          ) : null}
           <Text style={styles.cardMeta}>Last opened: {formatDate(item.meta.lastOpenedAt)}</Text>
         </View>
         <Pressable
@@ -247,7 +246,7 @@ export default function LibraryScreen() {
           keyExtractor={(item) => item.meta.id}
           renderItem={renderBook}
           contentContainerStyle={{ paddingBottom: 32 }}
-          ListEmptyComponent={<Text style={styles.empty}>No books yet. Import a .txt file to begin.</Text>}
+          ListEmptyComponent={<Text style={styles.empty}>No books yet. Import a .txt or .epub file to begin.</Text>}
         />
       </View>
     </SafeAreaView>

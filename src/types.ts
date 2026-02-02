@@ -1,5 +1,11 @@
 export type SourceType = 'txt' | 'epub';
 
+export interface ChapterMeta {
+  title: string;
+  startToken: number;
+  endToken: number;
+}
+
 export interface BookMeta {
   id: string;
   title: string;
@@ -11,6 +17,7 @@ export interface BookMeta {
   chunkSize: number;
   chunkCount: number;
   preview: string;
+  chapters?: ChapterMeta[];
   lastOpenedAt?: number;
 }
 

@@ -18,8 +18,69 @@ import { estimatedSeconds } from '@/src/parsing/tokenize';
 import { usePlayback } from '@/src/reader/usePlayback';
 import { loadBooks, loadReadingState, loadTokenChunk, saveReadingState, upsertBook } from '@/src/storage';
 import { DEFAULT_WPM } from '@/src/storage/keys';
-import { BookMeta, ReadingState } from '@/src/types';
+import { BookMeta, ChapterMeta, ReadingState } from '@/src/types';
 import { formatDuration, formatPercent } from '@/src/utils/format';
+
+function normalizeChapters(chapters: ChapterMeta[] | undefined, tokenCount: number): ChapterMeta[] {
+  if (!chapters?.length || tokenCount <= 0) return [];
+
+  const sorted = chapters
+    .map((chapter) => {
+      const rawStart = Number(chapter.startToken);
+      if (!Number.isFinite(rawStart)) return null;
+
+      const rawEnd = Number(chapter.endToken);
+      return {
+        title: chapter.title,
+        startToken: Math.max(0, Math.min(tokenCount - 1, Math.floor(rawStart))),
+        endToken: Number.isFinite(rawEnd)
+          ? Math.max(0, Math.min(tokenCount, Math.floor(rawEnd)))
+          : tokenCount,
+      };
+    })
+    .filter((chapter): chapter is { title: string; startToken: number; endToken: number } => Boolean(chapter))
+    .sort((a, b) => a.startToken - b.startToken);
+
+  const normalized: ChapterMeta[] = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    const chapter = sorted[i];
+    const next = sorted[i + 1];
+    if (normalized.length > 0 && normalized[normalized.length - 1].startToken === chapter.startToken) {
+      continue;
+    }
+
+    const fallbackEnd = next ? next.startToken : tokenCount;
+    const safeEnd = Math.max(chapter.startToken + 1, Math.min(tokenCount, chapter.endToken || fallbackEnd));
+    const title = chapter.title?.trim() || `Chapter ${normalized.length + 1}`;
+    normalized.push({
+      title,
+      startToken: chapter.startToken,
+      endToken: safeEnd,
+    });
+  }
+
+  return normalized;
+}
+
+function findChapterIndex(chapters: ChapterMeta[], tokenIndex: number): number {
+  if (!chapters.length) return -1;
+
+  let low = 0;
+  let high = chapters.length - 1;
+  let best = 0;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (chapters[mid].startToken <= tokenIndex) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return best;
+}
 
 export default function ReaderScreen() {
   const { bookId } = useLocalSearchParams<{ bookId: string }>();
@@ -310,6 +371,21 @@ export default function ReaderScreen() {
     const token = resolveToken(index);
     return token ?? currentToken;
   }, [currentToken, index, resolveToken]);
+  const chapters = useMemo(() => normalizeChapters(book?.chapters, book?.tokenCount ?? 0), [book]);
+  const currentChapterIndex = useMemo(() => findChapterIndex(chapters, index), [chapters, index]);
+  const currentChapter = currentChapterIndex >= 0 ? chapters[currentChapterIndex] : null;
+
+  const jumpToChapter = useCallback(
+    (targetChapterIndex: number) => {
+      if (!book || !chapters.length) return;
+      const nextChapterIndex = Math.max(0, Math.min(chapters.length - 1, targetChapterIndex));
+      const nextIndex = chapters[nextChapterIndex].startToken;
+      setIsPlaying(false);
+      setIndex(nextIndex);
+      primeAroundIndex(nextIndex).catch(() => undefined);
+    },
+    [book, chapters, primeAroundIndex]
+  );
 
   if (loading || !book) {
     return (
@@ -353,6 +429,28 @@ export default function ReaderScreen() {
         </View>
 
         <View style={styles.controls}>
+          {chapters.length > 1 ? (
+            <>
+              <View style={styles.rowButtons}>
+                <Pressable
+                  style={[styles.smallButton, currentChapterIndex <= 0 && styles.disabledButton]}
+                  disabled={currentChapterIndex <= 0}
+                  onPress={() => jumpToChapter(currentChapterIndex - 1)}>
+                  <Text style={styles.smallButtonText}>Prev Ch</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.smallButton, currentChapterIndex >= chapters.length - 1 && styles.disabledButton]}
+                  disabled={currentChapterIndex >= chapters.length - 1}
+                  onPress={() => jumpToChapter(currentChapterIndex + 1)}>
+                  <Text style={styles.smallButtonText}>Next Ch</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.chapterMeta} numberOfLines={1}>
+                Chapter {currentChapterIndex + 1}/{chapters.length}: {currentChapter?.title}
+              </Text>
+            </>
+          ) : null}
+
           <View style={styles.rowButtons}>
             <Pressable style={styles.smallButton} onPress={() => jump(-10)}>
               <Text style={styles.smallButtonText}>-10</Text>
@@ -467,6 +565,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#2a364c',
   },
+  disabledButton: {
+    opacity: 0.45,
+  },
   playButton: {
     backgroundColor: '#2f7df7',
   },
@@ -501,6 +602,11 @@ const styles = StyleSheet.create({
   meta: {
     color: '#9fb1ce',
     marginTop: 6,
+  },
+  chapterMeta: {
+    color: '#9fb1ce',
+    marginTop: -2,
+    marginBottom: 10,
   },
   progressMeta: {
     textAlign: 'right',
