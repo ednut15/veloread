@@ -15,7 +15,6 @@ const mockLoadReadingState = jest.fn();
 const mockRemoveBook = jest.fn();
 const mockSaveReadingState = jest.fn();
 const mockUpsertBook = jest.fn();
-const mockSaveTokenChunks = jest.fn();
 
 jest.mock('@/src/storage', () => ({
   loadBooks: (...args: unknown[]) => mockLoadBooks(...args),
@@ -24,15 +23,18 @@ jest.mock('@/src/storage', () => ({
   removeBook: (...args: unknown[]) => mockRemoveBook(...args),
   saveReadingState: (...args: unknown[]) => mockSaveReadingState(...args),
   upsertBook: (...args: unknown[]) => mockUpsertBook(...args),
-  saveTokenChunks: (...args: unknown[]) => mockSaveTokenChunks(...args),
 }));
 
+const mockCreateBookFromSections = jest.fn();
+const mockDiscardImportCopy = jest.fn();
 const mockImportEpubFromUri = jest.fn();
 const mockImportTxtFromUri = jest.fn();
 const mockPickBookFile = jest.fn();
 const mockValidateImportName = jest.fn();
 
 jest.mock('@/src/utils/importBook', () => ({
+  createBookFromSections: (...args: unknown[]) => mockCreateBookFromSections(...args),
+  discardImportCopy: (...args: unknown[]) => mockDiscardImportCopy(...args),
   importEpubFromUri: (...args: unknown[]) => mockImportEpubFromUri(...args),
   importTxtFromUri: (...args: unknown[]) => mockImportTxtFromUri(...args),
   pickBookFile: (...args: unknown[]) => mockPickBookFile(...args),
@@ -80,10 +82,14 @@ describe('LibraryScreen', () => {
     mockRemoveBook.mockResolvedValue(undefined);
     mockSaveReadingState.mockResolvedValue(undefined);
     mockUpsertBook.mockResolvedValue(undefined);
-    mockSaveTokenChunks.mockResolvedValue({ chunkCount: 1, chunkSize: 500 });
 
     mockPickBookFile.mockResolvedValue(null);
     mockValidateImportName.mockReturnValue('txt');
+    mockDiscardImportCopy.mockResolvedValue(undefined);
+    mockCreateBookFromSections.mockResolvedValue({
+      meta: baseBook,
+      initialState: baseState,
+    });
     mockImportTxtFromUri.mockResolvedValue({
       meta: baseBook,
       initialState: baseState,
@@ -120,5 +126,57 @@ describe('LibraryScreen', () => {
 
     expect(await screen.findByText('Unsupported format. Please import a .txt or .epub file.')).toBeTruthy();
     await waitFor(() => expect(mockImportTxtFromUri).not.toHaveBeenCalled());
+    expect(mockDiscardImportCopy).toHaveBeenCalledWith('file://book.pdf');
+  });
+
+  it('imports a picked file and discards the picker cache copy afterwards', async () => {
+    mockPickBookFile.mockResolvedValue({
+      uri: 'file://cache/book.txt',
+      name: 'book.txt',
+    });
+
+    const screen = render(<LibraryScreen />);
+    fireEvent.press(screen.getByText('Import Book'));
+
+    await waitFor(() =>
+      expect(mockImportTxtFromUri).toHaveBeenCalledWith(
+        'file://cache/book.txt',
+        'book.txt',
+        expect.objectContaining({ wpm: 320 }),
+        expect.anything()
+      )
+    );
+    await waitFor(() => expect(mockUpsertBook).toHaveBeenCalledWith(baseBook));
+    expect(mockSaveReadingState).toHaveBeenCalledWith(baseState);
+    await waitFor(() => expect(mockDiscardImportCopy).toHaveBeenCalledWith('file://cache/book.txt'));
+  });
+
+  it('discards the picker cache copy even when the import fails', async () => {
+    mockPickBookFile.mockResolvedValue({
+      uri: 'file://cache/broken.txt',
+      name: 'broken.txt',
+    });
+    mockImportTxtFromUri.mockRejectedValue(new Error('This file is empty.'));
+
+    const screen = render(<LibraryScreen />);
+    fireEvent.press(screen.getByText('Import Book'));
+
+    expect(await screen.findByText('This file is empty.')).toBeTruthy();
+    await waitFor(() => expect(mockDiscardImportCopy).toHaveBeenCalledWith('file://cache/broken.txt'));
+    expect(mockUpsertBook).not.toHaveBeenCalled();
+  });
+
+  it('loads the multi-chapter sample through the shared import pipeline', async () => {
+    const screen = render(<LibraryScreen />);
+    fireEvent.press(screen.getByText('Load Sample'));
+
+    await waitFor(() => expect(mockCreateBookFromSections).toHaveBeenCalled());
+    const [title, sections, sourceType] = mockCreateBookFromSections.mock.calls[0];
+    expect(title).toBe('Sample Text');
+    expect(sourceType).toBe('txt');
+    expect(sections.length).toBeGreaterThan(1);
+    expect(sections[0]).toEqual(expect.objectContaining({ title: 'Welcome' }));
+    await waitFor(() => expect(mockUpsertBook).toHaveBeenCalledWith(baseBook));
+    expect(mockSaveReadingState).toHaveBeenCalledWith(baseState);
   });
 });

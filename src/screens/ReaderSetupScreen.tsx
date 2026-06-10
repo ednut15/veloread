@@ -149,6 +149,7 @@ export default function ReaderSetupScreen() {
         <View style={styles.section}>
           <Text style={styles.label}>WPM: {Math.round(wpm)}</Text>
           <Slider
+            accessibilityLabel="Reading speed in words per minute"
             value={wpm}
             minimumValue={120}
             maximumValue={900}
@@ -172,7 +173,11 @@ export default function ReaderSetupScreen() {
 
         <Text style={styles.meta}>Estimated time remaining: {formatDuration(remainingTime)}</Text>
 
-        <Pressable style={styles.cta} onPress={handleContinue}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={startFromBeginning ? 'Start reading from the beginning' : 'Resume reading'}
+          style={styles.cta}
+          onPress={handleContinue}>
           <Text style={styles.ctaText}>{startFromBeginning ? 'Start Reading' : 'Resume Reading'}</Text>
         </Pressable>
       </View>

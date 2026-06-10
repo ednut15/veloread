@@ -41,4 +41,8 @@ describe('buildPreview', () => {
     expect(preview.length).toBe(180);
     expect(preview.endsWith('...')).toBe(true);
   });
+
+  it('skips paragraph-break tokens', () => {
+    expect(buildPreview(['alpha', '\n', 'beta', 'gamma'], 3)).toBe('alpha beta gamma');
+  });
 });

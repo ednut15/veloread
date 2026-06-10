@@ -53,16 +53,25 @@ export async function removeBook(bookId: string): Promise<void> {
   }
 }
 
+// Chunks per multiSet call: batching cuts AsyncStorage round-trips for large
+// books while keeping each write's payload bounded.
+const CHUNK_WRITE_BATCH = 50;
+
 export async function saveTokenChunks(
   bookId: string,
   tokens: string[],
   chunkSize: number = DEFAULT_CHUNK_SIZE
 ): Promise<{ chunkSize: number; chunkCount: number }> {
   const totalChunks = Math.ceil(tokens.length / chunkSize);
-  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-    const start = chunkIndex * chunkSize;
-    const chunk = tokens.slice(start, start + chunkSize);
-    await AsyncStorage.setItem(tokenChunkKey(bookId, chunkIndex), JSON.stringify(chunk));
+  for (let batchStart = 0; batchStart < totalChunks; batchStart += CHUNK_WRITE_BATCH) {
+    const batchEnd = Math.min(batchStart + CHUNK_WRITE_BATCH, totalChunks);
+    const pairs: [string, string][] = [];
+    for (let chunkIndex = batchStart; chunkIndex < batchEnd; chunkIndex += 1) {
+      const start = chunkIndex * chunkSize;
+      const chunk = tokens.slice(start, start + chunkSize);
+      pairs.push([tokenChunkKey(bookId, chunkIndex), JSON.stringify(chunk)]);
+    }
+    await AsyncStorage.multiSet(pairs);
   }
   return {
     chunkSize,

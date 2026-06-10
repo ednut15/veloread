@@ -13,11 +13,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ChapterPicker } from '@/src/components/ChapterPicker';
 import { OrpWord } from '@/src/components/OrpWord';
 import { estimatedSeconds } from '@/src/parsing/tokenize';
 import { findChapterIndex, normalizeChapters } from '@/src/reader/chapters';
 import { usePlayback } from '@/src/reader/usePlayback';
-import { loadBooks, loadReadingState, loadTokenChunk, saveReadingState, upsertBook } from '@/src/storage';
+import { loadBooks, loadReadingState, loadTokenChunk, saveReadingState } from '@/src/storage';
 import { DEFAULT_WPM } from '@/src/storage/keys';
 import { BookMeta, ReadingState } from '@/src/types';
 import { getErrorMessage } from '@/src/utils/errors';
@@ -38,6 +39,7 @@ export default function ReaderScreen() {
   const [punctuationPauses, setPunctuationPauses] = useState(true);
   const [tapWidth, setTapWidth] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [chapterPickerVisible, setChapterPickerVisible] = useState(false);
 
   const chunkCacheRef = useRef(new Map<number, string[]>());
   const lastPersistRef = useRef({ at: 0, index: 0 });
@@ -124,12 +126,10 @@ export default function ReaderScreen() {
         lastReadAt: now,
       };
 
+      // Only the small per-book reading state is written here; rewriting the
+      // whole book list on the persistence throttle is needless I/O, and the
+      // setup screen already bumps lastOpenedAt when the book is opened.
       await saveReadingState(state);
-      await upsertBook({
-        ...activeBook,
-        updatedAt: now,
-        lastOpenedAt: now,
-      });
     },
     []
   );
@@ -200,6 +200,7 @@ export default function ReaderScreen() {
   usePlayback({
     isPlaying,
     index,
+    tokenCount: book?.tokenCount ?? 0,
     wpm,
     punctuationPauses,
     resolveToken,
@@ -346,6 +347,19 @@ export default function ReaderScreen() {
     [book, chapters, primeAroundIndex]
   );
 
+  const openChapterPicker = useCallback(() => {
+    setIsPlaying(false);
+    setChapterPickerVisible(true);
+  }, []);
+
+  const handleChapterSelect = useCallback(
+    (chapterIndex: number) => {
+      setChapterPickerVisible(false);
+      jumpToChapter(chapterIndex);
+    },
+    [jumpToChapter]
+  );
+
   const headerProgressLabel = useMemo(() => {
     if (!book || book.tokenCount <= 0) return null;
     const consumedCount = Math.min(index + 1, book.tokenCount);
@@ -425,40 +439,62 @@ export default function ReaderScreen() {
             <>
               <View style={styles.rowButtons}>
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous chapter"
                   style={[styles.smallButton, currentChapterIndex <= 0 && styles.disabledButton]}
                   disabled={currentChapterIndex <= 0}
                   onPress={() => jumpToChapter(currentChapterIndex - 1)}>
                   <Text style={styles.smallButtonText}>Prev Ch</Text>
                 </Pressable>
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Next chapter"
                   style={[styles.smallButton, currentChapterIndex >= chapters.length - 1 && styles.disabledButton]}
                   disabled={currentChapterIndex >= chapters.length - 1}
                   onPress={() => jumpToChapter(currentChapterIndex + 1)}>
                   <Text style={styles.smallButtonText}>Next Ch</Text>
                 </Pressable>
               </View>
-              <Text style={styles.chapterMeta} numberOfLines={1}>
-                Chapter {currentChapterIndex + 1}/{chapters.length}: {currentChapter?.title}
-              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open chapter list"
+                style={styles.chapterMetaButton}
+                onPress={openChapterPicker}>
+                <Text style={styles.chapterMeta} numberOfLines={1}>
+                  Chapter {currentChapterIndex + 1}/{chapters.length}: {currentChapter?.title}
+                </Text>
+                <Text style={styles.chapterMetaChevron}>▾</Text>
+              </Pressable>
             </>
           ) : null}
 
           <View style={styles.rowButtons}>
-            <Pressable style={styles.smallButton} onPress={() => jump(-10)}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back 10 words"
+              style={styles.smallButton}
+              onPress={() => jump(-10)}>
               <Text style={styles.smallButtonText}>-10</Text>
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isPlaying ? 'Pause reading' : 'Start reading'}
               style={[styles.smallButton, isPlaying ? styles.pauseButton : styles.playButton]}
               onPress={handlePlayPause}>
               <Text style={styles.smallButtonText}>{isPlaying ? 'Pause' : 'Play'}</Text>
             </Pressable>
-            <Pressable style={styles.smallButton} onPress={() => jump(10)}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Forward 10 words"
+              style={styles.smallButton}
+              onPress={() => jump(10)}>
               <Text style={styles.smallButtonText}>+10</Text>
             </Pressable>
           </View>
 
           <Text style={styles.controlLabel}>Progress</Text>
           <Slider
+            accessibilityLabel="Reading position"
             value={index}
             minimumValue={0}
             maximumValue={Math.max(1, book.tokenCount - 1)}
@@ -477,6 +513,7 @@ export default function ReaderScreen() {
             <Text style={styles.meta}>{Math.round(wpm)}</Text>
           </View>
           <Slider
+            accessibilityLabel="Reading speed in words per minute"
             value={wpm}
             minimumValue={120}
             maximumValue={900}
@@ -490,6 +527,9 @@ export default function ReaderScreen() {
           <View style={styles.rowSpaceBetween}>
             <Text style={styles.controlLabel}>ORP highlight</Text>
             <Pressable
+              accessibilityRole="switch"
+              accessibilityLabel="ORP highlight"
+              accessibilityState={{ checked: orpEnabled }}
               style={[styles.toggle, orpEnabled && styles.toggleEnabled]}
               onPress={() => setOrpEnabled((prev) => !prev)}>
               <Text style={styles.smallButtonText}>{orpEnabled ? 'On' : 'Off'}</Text>
@@ -499,6 +539,9 @@ export default function ReaderScreen() {
           <View style={styles.rowSpaceBetween}>
             <Text style={styles.controlLabel}>Punctuation pauses</Text>
             <Pressable
+              accessibilityRole="switch"
+              accessibilityLabel="Punctuation pauses"
+              accessibilityState={{ checked: punctuationPauses }}
               style={[styles.toggle, punctuationPauses && styles.toggleEnabled]}
               onPress={() => setPunctuationPauses((prev) => !prev)}>
               <Text style={styles.smallButtonText}>{punctuationPauses ? 'On' : 'Off'}</Text>
@@ -507,6 +550,14 @@ export default function ReaderScreen() {
 
           <Text style={styles.meta}>Estimated remaining: {formatDuration(estimatedSeconds(remaining, wpm))}</Text>
         </View>
+
+        <ChapterPicker
+          visible={chapterPickerVisible}
+          chapters={chapters}
+          currentChapterIndex={currentChapterIndex}
+          onSelect={handleChapterSelect}
+          onClose={() => setChapterPickerVisible(false)}
+        />
       </View>
     </SafeAreaView>
   );
@@ -606,9 +657,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  chapterMeta: {
-    color: '#9fb1ce',
+  chapterMetaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginTop: -2,
     marginBottom: 10,
+  },
+  chapterMeta: {
+    flexShrink: 1,
+    color: '#9fb1ce',
+  },
+  chapterMetaChevron: {
+    color: '#5cc8ff',
+    fontWeight: '700',
   },
 });

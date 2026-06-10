@@ -59,6 +59,12 @@ export function estimatedSeconds(tokenCount: number, wpm: number): number {
 }
 
 export function buildPreview(tokens: string[], maxTokens = 18): string {
-  const preview = tokens.slice(0, maxTokens).join(' ');
+  const previewTokens: string[] = [];
+  for (const token of tokens) {
+    if (previewTokens.length >= maxTokens) break;
+    if (token === '\n') continue;
+    previewTokens.push(token);
+  }
+  const preview = previewTokens.join(' ');
   return preview.length > 180 ? `${preview.slice(0, 177)}...` : preview;
 }

@@ -9,7 +9,8 @@ and punctuation-aware pacing to help you read faster while staying in flow.
 - Import plain text (`.txt`) books from your device.
 - Import EPUB (`.epub`) books (text extraction from chapter documents).
 - Keep EPUB chapter boundaries and jump chapter-to-chapter in reader.
-- Load a built-in sample text to test the reader quickly.
+- Browse a tappable chapter list to jump straight to any chapter.
+- Load a built-in multi-chapter sample text to test the reader quickly.
 - Tune reading speed from 120 to 900 WPM.
 - Toggle ORP highlight and punctuation pauses.
 - Resume where you stopped, with reading progress persisted locally.
