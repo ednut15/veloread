@@ -2,6 +2,7 @@
   "expo": {
     "name": "VeloRead",
     "slug": "veloread",
+    "owner": "tunz_adeola",
     "version": "1.0.0",
     "runtimeVersion": {
       "policy": "appVersion"
@@ -53,6 +54,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "bed58b78-46a9-4b04-bee2-376ac8126a7d"
+      }
     }
   }
 }
