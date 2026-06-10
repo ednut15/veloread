@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { buildPreview, tokenize } from '@/src/parsing/tokenize';
 import {
   loadBooks,
   loadGlobalSettings,
@@ -18,39 +17,51 @@ import {
   removeBook,
   saveReadingState,
   upsertBook,
-  saveTokenChunks,
 } from '@/src/storage';
-import { DEFAULT_CHUNK_SIZE } from '@/src/storage/keys';
 import { BookMeta, ImportProgress, ReadingState } from '@/src/types';
 import { getErrorMessage } from '@/src/utils/errors';
 import { formatDate, formatPercent } from '@/src/utils/format';
-import { importEpubFromUri, importTxtFromUri, pickBookFile, validateImportName } from '@/src/utils/importBook';
+import {
+  BookSection,
+  createBookFromSections,
+  discardImportCopy,
+  importEpubFromUri,
+  importTxtFromUri,
+  pickBookFile,
+  validateImportName,
+} from '@/src/utils/importBook';
 
-const SAMPLE_TEXT = `VeloRead sample text.
-
-Chapter 1
-The room was quiet, and the clock on the wall ticked in a patient rhythm. A reader opened a notebook, set a goal for the evening, and decided to focus on flow rather than perfection. One word, then the next, then the next: that was the only job.
-
-Chapter 2
-At first, the pace felt unusual. Short words flashed by quickly; longer words asked for slightly more attention. Commas introduced small pauses, while full stops created a deeper breath. Instead of sounding every syllable in their head, the reader practiced recognition and trust.
-
-Chapter 3
-After a few minutes, comprehension improved. Ideas began to connect across sentences, and paragraphs felt like complete units. Questions still appeared—What does this phrase imply? Why did the author choose this example?—but the reader learned to mark those moments and keep moving.
-
-Chapter 4
-When fatigue appeared, the reader lowered the speed from 360 to 280 words per minute. Accuracy returned. Then, with confidence restored, the speed climbed again. This gentle adjustment became a habit: push when focused, ease back when overloaded, recover, and continue.
-
-Chapter 5
-By the end of the session, the reader had finished more pages than usual and remembered key details: names, transitions, and arguments. Progress was not magic; it was consistency. Tomorrow, the plan was simple—sit down, start the timer, and read one token at a time.`;
+const SAMPLE_SECTIONS: BookSection[] = [
+  {
+    title: 'Welcome',
+    text: 'VeloRead sample text. Use the chapter list to jump between sections while you practice.',
+  },
+  {
+    title: 'One Word at a Time',
+    text: 'The room was quiet, and the clock on the wall ticked in a patient rhythm. A reader opened a notebook, set a goal for the evening, and decided to focus on flow rather than perfection. One word, then the next, then the next: that was the only job.',
+  },
+  {
+    title: 'Finding the Pace',
+    text: 'At first, the pace felt unusual. Short words flashed by quickly; longer words asked for slightly more attention. Commas introduced small pauses, while full stops created a deeper breath. Instead of sounding every syllable in their head, the reader practiced recognition and trust.',
+  },
+  {
+    title: 'Comprehension Returns',
+    text: 'After a few minutes, comprehension improved. Ideas began to connect across sentences, and paragraphs felt like complete units. Questions still appeared—What does this phrase imply? Why did the author choose this example?—but the reader learned to mark those moments and keep moving.',
+  },
+  {
+    title: 'Push and Recover',
+    text: 'When fatigue appeared, the reader lowered the speed from 360 to 280 words per minute. Accuracy returned. Then, with confidence restored, the speed climbed again. This gentle adjustment became a habit: push when focused, ease back when overloaded, recover, and continue.',
+  },
+  {
+    title: 'Consistency Wins',
+    text: 'By the end of the session, the reader had finished more pages than usual and remembered key details: names, transitions, and arguments. Progress was not magic; it was consistency. Tomorrow, the plan was simple—sit down, start the timer, and read one token at a time.',
+  },
+];
 
 type BookListItem = {
   meta: BookMeta;
   state: ReadingState | null;
 };
-
-function makeId() {
-  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-}
 
 function progressLabel(progress?: ImportProgress | null): string {
   if (!progress) return '';
@@ -92,40 +103,22 @@ export default function LibraryScreen() {
 
     try {
       const settings = await loadGlobalSettings();
-      setImportStatus({ phase: 'tokenizing', progress: 0.6 });
-      const tokens = tokenize(SAMPLE_TEXT);
-      const now = Date.now();
-      const bookId = makeId();
-      const { chunkCount, chunkSize } = await saveTokenChunks(bookId, tokens, DEFAULT_CHUNK_SIZE);
-      setImportStatus({ phase: 'saving', progress: 0.9 });
+      const imported = await createBookFromSections(
+        'Sample Text',
+        SAMPLE_SECTIONS,
+        'txt',
+        {
+          wpm: settings.defaultWpm,
+          orpEnabled: settings.defaultOrpEnabled,
+          punctuationPauses: settings.defaultPunctuationPauses,
+        },
+        { onProgress: setImportStatus }
+      );
 
-      const meta: BookMeta = {
-        id: bookId,
-        title: 'Sample Text',
-        sourceType: 'txt',
-        createdAt: now,
-        updatedAt: now,
-        textLength: SAMPLE_TEXT.length,
-        tokenCount: tokens.length,
-        chunkSize,
-        chunkCount,
-        preview: buildPreview(tokens),
-        lastOpenedAt: now,
-      };
-
-      const state: ReadingState = {
-        bookId,
-        index: 0,
-        wpm: settings.defaultWpm,
-        orpEnabled: settings.defaultOrpEnabled,
-        punctuationPauses: settings.defaultPunctuationPauses,
-        lastReadAt: now,
-      };
-
-      await upsertBook(meta);
-      await saveReadingState(state);
+      await upsertBook(imported.meta);
+      await saveReadingState(imported.initialState);
       await refresh();
-      setLastPreview(meta.preview);
+      setLastPreview(imported.meta.preview);
     } catch (error) {
       setError(getErrorMessage(error, 'Failed to load sample.'));
     } finally {
@@ -142,6 +135,7 @@ export default function LibraryScreen() {
 
     const fileType = validateImportName(file.name ?? '');
     if (fileType === 'unsupported') {
+      await discardImportCopy(file.uri);
       setError('Unsupported format. Please import a .txt or .epub file.');
       return;
     }
@@ -170,6 +164,7 @@ export default function LibraryScreen() {
     } catch (error) {
       setError(getErrorMessage(error, 'Failed to import book.'));
     } finally {
+      await discardImportCopy(file.uri);
       setIsBusy(false);
       setImportStatus(null);
     }
@@ -202,6 +197,8 @@ export default function LibraryScreen() {
     const index = item.state?.index ?? 0;
     return (
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${item.meta.title}`}
         style={styles.card}
         onPress={() => router.push({ pathname: '/setup/[bookId]', params: { bookId: item.meta.id } })}>
         <View style={{ flex: 1 }}>
@@ -215,6 +212,8 @@ export default function LibraryScreen() {
           <Text style={styles.cardMeta}>Last opened: {formatDate(item.meta.lastOpenedAt)}</Text>
         </View>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${item.meta.title}`}
           onPress={(event) => {
             event.stopPropagation();
             handleDelete(item.meta.id);
@@ -232,10 +231,20 @@ export default function LibraryScreen() {
         <Text style={styles.subtitle}>RSVP reading with ORP focus</Text>
 
         <View style={styles.buttonRow}>
-          <Pressable style={[styles.button, styles.secondaryButton]} onPress={ingestSample} disabled={isBusy}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Load sample text"
+            style={[styles.button, styles.secondaryButton]}
+            onPress={ingestSample}
+            disabled={isBusy}>
             <Text style={styles.buttonText}>Load Sample</Text>
           </Pressable>
-          <Pressable style={styles.button} onPress={handleImport} disabled={isBusy}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Import a book"
+            style={styles.button}
+            onPress={handleImport}
+            disabled={isBusy}>
             <Text style={styles.buttonText}>Import Book</Text>
           </Pressable>
         </View>

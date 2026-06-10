@@ -62,6 +62,18 @@ describe('storage', () => {
     await expect(loadTokenChunk('book-1', 2)).resolves.toEqual(['e']);
   });
 
+  it('keeps chunk ordering across multiSet write batches', async () => {
+    // 120 chunks of 2 tokens spans three write batches of 50.
+    const tokens = Array.from({ length: 240 }, (_, i) => `t${i}`);
+    const result = await saveTokenChunks('book-2', tokens, 2);
+
+    expect(result).toEqual({ chunkSize: 2, chunkCount: 120 });
+    await expect(loadTokenChunk('book-2', 0)).resolves.toEqual(['t0', 't1']);
+    await expect(loadTokenChunk('book-2', 60)).resolves.toEqual(['t120', 't121']);
+    await expect(loadTokenChunk('book-2', 119)).resolves.toEqual(['t238', 't239']);
+    expect(AsyncStorage.multiSet).toHaveBeenCalledTimes(3);
+  });
+
   it('removes a book with reading state and token chunks', async () => {
     await upsertBook(makeBook('remove-me', 1000));
     await saveReadingState({
